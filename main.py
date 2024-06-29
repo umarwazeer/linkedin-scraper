@@ -3,60 +3,54 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from client import LIClient
-from settings import search_keys
 import time
 
-
 chrome_options = webdriver.ChromeOptions()
-# chrome_options.add_argument("user-agent=whatever you want")
-# chrome_options.add_argument("--disable-notifications")
+chrome_options.add_argument("--disable-notifications")
 chrome_options.add_argument("--incognito")
+chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 
 def parse_command_line_args():
     parser = argparse.ArgumentParser(description="Parse LinkedIn search parameters")
-    parser.add_argument('--username', type=str, required=True, help="Enter LinkedIn username")
-    parser.add_argument('--password', type=str, required=True, help="Enter LinkedIn password")
-    parser.add_argument('--keyword', default=search_keys['keywords'], nargs='*', help="Enter search keys separated by a single space")
-    parser.add_argument('--location', default=search_keys['locations'], nargs='*', help="Enter search locations separated by a single space")
-    parser.add_argument('--search_radius', type=int, default=search_keys['search_radius'], nargs='?', help="Enter a search radius (in miles)")
-    parser.add_argument('--results_page', type=int, default=search_keys['page_number'], nargs='?', help="Enter a specific results page")
-    parser.add_argument('--date_range', type=str, default=search_keys['date_range'], nargs='?', help="Specify a specific date range")
-    parser.add_argument('--sort_by', type=str, default=search_keys['sort_by'], nargs='?', help="Sort results by relevance or date posted")
-    parser.add_argument('--salary_range', type=str, default=search_keys['salary_range'], nargs='?', help="Set a minimum salary requirement")
-    parser.add_argument('--filename', type=str, default=search_keys['filename'], nargs='?', help="Specify a filename to which data will be written")
+    parser.add_argument('--username', type=str, required=True, help="Enter LI username")
+    parser.add_argument('--password', type=str, required=True, help="Enter LI password")
+    parser.add_argument('--keyword', type=str, nargs='*', help="Enter search keys")
+    parser.add_argument('--location', type=str, nargs='*', help="Enter search locations")
+    parser.add_argument('--sort_by', type=str, default='Relevance', help="Sort by relevance or date posted")
     return vars(parser.parse_args())
+
+def initialize_driver():
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    return driver
+
+def login_with_retry(driver, liclient):
+    max_attempts = 3
+    current_attempt = 1
+    while current_attempt <= max_attempts:
+        try:
+            liclient.login()
+            return  # Exit function if login is successful
+        except Exception as e:
+            print(f"Attempt {current_attempt} failed. Error: {e}")
+            if "502 Bad Gateway" in str(e):
+                print("Encountered 502 Bad Gateway. Retrying in 5 seconds...")
+                time.sleep(5)
+            current_attempt += 1
+    print("Failed to login after multiple attempts.")
 
 if __name__ == "__main__":
     search_keys = parse_command_line_args()
 
-    # Initialize Selenium WebDriver
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    print(chrome_options, service, )
-
-    # Initialize LinkedIn web client
-    print(search_keys)
+    driver = initialize_driver()
     liclient = LIClient(driver, **search_keys)
 
     try:
-        liclient.login()
-
-        # Wait for page load
-        time.sleep(3)
-
-        assert isinstance(search_keys["keyword"], list)
-        assert isinstance(search_keys["location"], list)
-
-        for keyword in search_keys["keyword"]:
-            for location in search_keys["location"]:
-                liclient.keyword = keyword
-                liclient.location = location
-                # Additional methods for navigating and searching jobs
-                liclient.search_jobs()
-
+        login_with_retry(driver, liclient)
+        liclient.search_jobs()
     except Exception as e:
         print(f"An error occurred: {e}")
-
     finally:
-        if liclient.driver:
-            liclient.driver.quit()
+        if driver:
+            driver.quit()
+
